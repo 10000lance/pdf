@@ -1,4 +1,4 @@
-.idea
-./pdfminer+wand/__pycache__
-./pdfminer+wand/testOutput
-./pdf2htmlex/testOutput
+/.idea
+pdfminer+wand/__pycache__/
+pdfminer+wand/testOutput/
+pdf2htmlex/testOutput/
