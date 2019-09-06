@@ -1,0 +1,1788 @@
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+Recently researchers have proposed mod-
+eling register allocation as an integer linear programming
+(IP) problem and solving it optimally for general pur-
+pose processors [17, 20] and for dedicated embedded sys-
+tems [23]. Compared with traditional graph-coloring ap-
+proaches, the IP-based allocators can improve a program ’s
+performance. However, the solution times are much slower.
+This paper presents an IP-based optimal register alloca-
+tor which is much faster than previous work. We present
+several local and global reduction techniques to identify lo-
+cations in a program’s control-ﬂow graph where spill de-
+cisions and register deallocation decisions are unnecessary
+for optimal register allocation. We propose a hierarchical
+reduction approach to efﬁciently remove the correspond-
+ing redundant decisions and constraints from the IP model.
+This allocator is built into the Gnu C Compiler and is eval-
+uated experimentally using the SPEC92INT benchmarks.
+The results show that the improved IP model is much sim-
+pler. The number of constraints produced is almost linear
+with the function size. The optimal allocation time is much
+faster, with a speedup factor of about 150 for hard alloca-
+tion problems.
+Register allocation is one of the most important com-
+piler optimization phases. Effective register allocators can
+improve a programís performance [9], reduce a programís
+code-size [23] and lower a programís power consumption
+[28]. Basically, the register allocation problem is to assign
+a target processorís limited real registers to the unlimited
+symbolic registers used in the compilerís representation of
+the program. The objective is to minimize register alloca-
+tion overhead, the performance overhead of the spill code
+inserted when no real register is available for a symbolic
+register.
+
+1. Introduction
+
+Abstract
+
+–
+
+Abstract
+
+A Faster Optimal Register Allocator
+Changqing Fu and Kent Wilken
+Department of Electrical and Computer Engineering
+University of California, Davis
+Davis, CA 95616, U.S.A.
+(cid:1)cqfu,wilken(cid:2)@ece.ucdavis.edu
+
+The register allocation problem can be categorized into
+local allocation and global allocation. Local register allo-
+cation assigns real registers to symbolic registers for each
+basic block, a sequence of straight-line code. Global reg-
+ister allocation assigns real registers to symbolic registers
+throughout a procedure or a function. Sethi [27] proves that
+global register allocation is NP-complete, and Farach and
+Liberatore [13] show that local register allocation is NP-
+complete. Various heuristics have been proposed for local
+[1, 14, 15, 21], and global [5, 8, 9, 10, 18, 26] register allo-
+cations.
+This paper focuses on the harder global register alloca-
+tion problem. The traditional global allocator is based on
+a graph-coloring heuristic developed by Chaitin et al. [9].
+Various graph-coloring improvements have been proposed
+more recently [3, 4, 6, 7, 8, 10, 11, 18, 25]. These improve-
+ments rely on different heuristics to determine the place-
+ment of the spill code and the order of the symbolic registers
+selected for spilling.
+Practically, graph-coloring allocators have worked well
+in modern compilers. However, the quality of the solution
+produced cannot be guaranteed. Sometimes graph-coloring
+allocators produce register overhead which signiÝcantly de-
+grades program performance [17].
+Issues about register
+coalescing, procedure call conventions, special register re-
+quirements for irregular register architectures and for dedi-
+cated embedded systems make it more difÝcult to produce
+good allocations.
+[16, 17, 20, 23] recently proposed modeling register al-
+location as an integer linear programming (IP) problem and
+solve it optimally with an IP solver. They show that al-
+though optimal register allocation has been considered to
+be computationally intractable [22], practically it is solv-
+able in most cases. Goodwin and Wilken [17] proposed an
+Optimal Register Allocator (ORA) for a uniform register
+architecture. Kong and Wilken [20] present a framework
+based on ORA for irregular architectures, like the x86 ar-
+chitecture. Naik and Palsberg in [23] use IP to model code-
+size aware register allocation for embedded microproces-
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+sors. [17] shows that ORA can signiÝcantly reduce register
+allocation overhead compared with the graph-coloring allo-
+cator. [23] shows that an IP-based allocator can generate
+code as compact as carefully hand-crafted code. However,
+the IP allocator solution times are slow.
+A primary reason for the slow solution times is the high
+complexity of the IP model. Many redundancies exist in the
+proposed IP models. These redundancies can dramatically
+increase the number of solutions and the time for Ýnding an
+optimal solution.
+Appel and George [2] propose a faster IP-based alloca-
+tor. Their approach reduces the IP model complexity by
+decomposing the register allocation problem into two sub-
+problems: spill code placement and register assignment,
+and solves each subproblem using IP. Although the IP-based
+allocator is faster, the decomposition results in an allocation
+which may not be optimal.
+This paper presents a faster optimal global register allo-
+cator based on new techniques for reducing IP model com-
+plexity. The new techniques identify and reduce redundan-
+cies from the IP model while preserving the allocation ís op-
+timality. Our allocator builds on the basic ORA model pro-
+posed in [17]. We analyze the placement of spill decisions
+and register deallocation decisions produced in the program
+control-Ðow graph (CFG), and analyze the dependency be-
+tween a potential register allocation action (load) and a reg-
+ister deallocation action. We explore several reduction tech-
+niques to identify locations where spill decisions and deal-
+location decisions are unnecessary for an optimal register
+allocation. A region-based hierarchical reduction approach
+is used to efÝciently remove the corresponding redundant
+decisions and constraints from the basic ORA model.
+Our results show that the improved IP model is much
+simpler. The number of constraints generated in the inte-
+ger programs grows almost linearly with the program size
+(cid:1)(cid:1)(cid:1) . Optimal allocation is much faster than the basic
+ORA. For 2202 functions from the SPEC92 integer bench-
+marks, the new allocator solves each function within a time
+limit 7 seconds, while the basic ORA requires a time limit
+1024 seconds, making the new allocator 150X faster for the
+hard problems from these functions.
+
+       CFG
+
+Live-Range
+       Graph
+
+Figure 1. Faster ORA allocator framework.
+
+Analysis Module
+Decision
+Placements
+Constraint
+Placements
+
+write
+
+The rest of this paper is organized as follows. Section
+2 gives an overview of optimal register allocation and the
+faster ORA allocator. Section 3 introduces ORA live-range
+graphs. Section 4 and 5 present global and local reduc-
+tion techniques for load, store and deallocation decisions.
+Section 6 presents various constraint reduction techniques.
+Section 7 shows the experimental results and Section 8 sum-
+marizes the paperís contributions.
+2. Faster optimal register allocator overview
+The faster ORA allocator consists of three components:
+the analysis module, the solver module and the rewrite mod-
+ule, as illustrated in Figure 1.
+The analysis module analyzes a functionís CFG to con-
+struct a set of symbolic register live-range graphs, and deter-
+mines the locations in the live-range graphs where various
+allocation decisions should be made and various allocation
+constraints should be enforced. These decisions and con-
+straints are a sufÝcient set for an optimal allocation [17].
+Local and global reduction techniques are then applied to
+identify and eliminate unnecessary allocation decisions. An
+objective function for minimizing register allocation over-
+head is produced . The objective function and the remaining
+decisions and constraints comprise the ORA model.
+Each decision in the ORA model represents a register al-
+location action. For example, a deﬁne decision represents
+whether or not a symbolic register should be deÝned into a
+speciÝc real register, and a deallocation decision represents
+whether or not the speci Ýc real register should be deallo-
+cated from the symbolic register. Each decision is a binary
+decision. A 1(0) indicates a taken (not taken) register allo-
+cation action.
+The constraints ensure a valid register allocation is pro-
+duced for the set of decisions. For example, a single-
+symbolic constraint [17] is used to ensure a real register can
+be allocated to at most one symbolic register at any point of
+the program.
+The objective function consists of a set of costed deci-
+sions to ensure a valid solution is optimal. The cost of a
+
+Solver Module
+Rewrite Module
+Global+Local
+Reduction
+ILP
+Solver
+Register
+Replacement
+Constraint
+Reduction
+read
+read
+write
+ORA
+Model
+
+       Code
+read
+write
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+3. ORA Live-Range Graphs
+
+decision is equal to the estimated dynamic instruction exe-
+cution count which will occur if the corresponding action is
+taken.
+The solver module constructs a 0-1 integer program [24]
+from the ORA model, and passes it to an IP solver. The
+solver determines a value of either 0 or 1 for each decision
+so the constraints are satisÝed and the objective function is
+minimized.
+The rewrite module rewrites the intermediate instruc-
+tions based on the solver solution, with each symbolic reg-
+ister replaced by the assigned real register, and with spill
+code inserted at the prescribed locations.
+An ORA Live-Range Graph (LRG) is a directed sub-
+graph derived from a CFG. A LRG starts at a symbolic reg-
+isterís deÝnition(s) and ends at the symbolic registerís last-
+use(s). For each symbolic register, a LRG is constructed for
+each real register. Figure 2(a) shows a CFG, and Figure 2(b)
+shows the LRGs for symbolic register (cid:3) for each real reg-
+ister from (cid:1) to  . The number labeled at each edge of the
+graphs is the estimated execution count of the basic block
+where the edge resides (e.g. from program proÝling).
+LRGs are used to mark the placement of various regis-
+ter allocation decisions, such as load, store and deallocation
+decisions. In the basic ORA model, various allocation deci-
+sions are placed at locations which are sufÝcient for optimal
+register allocation [17]:
+(cid:1) Load decisions, which represent whether or not the
+value of a symbolic register should be loaded from
+memory, are placed before every symbolic register use
+and placed at every LRG merge edge.
+(cid:1) Store decisions, which represent whether or not the
+value of a symbolic register should be saved into mem-
+ory, are placed after every symbolic register deÝnition
+and at every LRG diverge edge.
+
+Figure 2. Control-ﬂow graph and live-range graph.
+
+Control-flow graph
+
+100
+  . . . . . .
+A = ...
+0
+100
+B = A + 1
+... = B * 2
+  . . . . . .
+  . . . . . .
+100
+  . . . . . .
+... = A * 2
+  . . . . . .
+100
+(a)
+
+r1
+GA
+100
+0
+rn
+GA
+ 
+
+ 
+
+  
+
+  
+
+  
+ 
+100
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+100
+Live-range graph
+(b)
+
+  
+  
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+Live-range graph
+(b)
+
+Figure 3. Placements of load, store and deallocation deci-
+sions in a LRG.
+(cid:1) Deallocation decisions, which represent whether or
+not the value of a symbolic register should be deal-
+located from a real register, are placed after every def-
+inition, after every use and at every diverge edge.
+Figure 3(a) shows the placements of load, store and deal-
+location decisions in the live-range graph of symbolic reg-
+ister (cid:3) for real register (cid:1) in the basic ORA model. There
+are 4 load decisions, 3 store decisions and 4 deallocation
+decisions. The symbols used in the LRG are given in Fig-
+ure 3(c).
+The various allocation decisions used in the basic ORA
+model are sufÝcient, but not necessary for optimal register
+allocation. Some of the decisions are redundant and can be
+removed. This is because these decisions may represent reg-
+ister allocation actions that are not required for an optimal
+register allocation. Typically, a register allocation problem
+will have many different optimal allocations, each resulting
+in the same register allocation overhead. To ensure opti-
+mality, the decisions necessary to produce at least one of
+the optimal allocations must be retained. However, many
+of the decisions for other optimal allocations can often be
+eliminated.
+For example, the load decision and the deallocation de-
+cisions placed between the deÝnition of (cid:3) and the use of
+(cid:3) in the graph (cid:5)(cid:1)
+(cid:4) in Figure 3(a) are redundant decisions
+because in an optimal allocation, once (cid:3) is allocated to a
+real register at the deÝnition instruction, (cid:3) will remain in
+this real register until the use of (cid:3). From this observation,
+we derive an interval-based local reduction technique which
+will be introduced in Section 5.
+In addition, the decision to store (cid:3) on the right diverge
+edge in the graph is redundant because this store decision
+is dominated by a equal cost store decision placed after the
+deÝnition of (cid:3). Similarly, a decision to load (cid:3) on the right
+merge edge in the graph is redundant because this load deci-
+sion is post-dominated by a equal cost load decision placed
+before the last-use of (cid:3). After this load decision is elim-
+
+G
+r1
+A
+100
+ 
+
+ 
+
+ 
+
+  
+
+ 
+
+  
+
+ 
+<>
+<>
+<>
+0
+ 
+
+ 
+
+ 
+<>
+100
+  
+
+  
+
+  
+
+  
+
+ 
+
+ 
+
+100
+  
+0
+Load, store and deallocation 
+decision placements in a LRG
+(a)
+
+r1
+GA
+<>
+100
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+<>
+ 
+
+ 
+
+ 
+<>
+100
+0
+  
+<>
+100
+ 
+
+ 
+
+ 
+100
+ 
+Use
+ 
+Load
+ 
+
+ 
+
+ 
+
+ 
+
+<>
+Store
+Reduced load, store and
+deallocation decision
+placements in a LRG
+(b)
+Symbols used
+in LRG
+(c)
+
+Definition
+ 
+Use
+Last-Use
+ 
+Load
+ 
+
+ 
+
+ 
+
+ 
+
+<>
+Store
+Deallocation
+Reduced load, store and
+deallocation decision
+placements in a LRG
+(b)
+Symbols used
+in LRG
+(c)
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+4. Global reduction
+
+(cid:1)(cid:2)(cid:3)(cid:2) (cid:4)(cid:5)(cid:6)(cid:7)(cid:7)  (cid:13)(cid:6)(cid:5)(cid:5)
+
+inated, the decision to load (cid:3) on the left merge edge be-
+comes redundant because for any valid allocation, the allo-
+cation of (cid:3) at both incoming edges of the merge vertex has
+to be the same. Finally, the decision to store (cid:3) on the left
+diverge edge in the graph is redundant because no load will
+use the stored value. From these observations, we derive
+several global reduction techniques which are presented in
+Section 4.
+Figure 3(b) shows the simpli Ýed graph (cid:5) (cid:1)
+(cid:4) for the ex-
+ample used in Figure 3(a).
+Global reduction eliminates unnecessary load, store and
+deallocation decisions placed at the diverge and merge
+edges in the live-range graphs. These decisions account for
+more than 80% of the total decisions generated by the ba-
+sic ORA model. Reducing these decisions can signiÝcantly
+simplify the modelís complexity.
+The placement of the deallocation decisions at the di-
+verge edges and the load decisions at the merge edges in
+a LRG can have a hierarchical structure as shown in Fig-
+ure 4. Analysis of this hierarchical structure can reduce un-
+necessary decisions from the basic ORA model. A diverge-
+merge region is a single-entry single-exit (SESE) region
+[19], which starts at a diverge vertex and ends at a merge
+vertex of the LRG. Each diverge-merge region is catego-
+rized as: a diamond region, a loop region or an unstructured
+region.
+
+a
+
+b
+<>
+e
+
+Figure 4. Decision placement hierarchy.
+
+Gs
+<>
+<>
+<>
+c
+d
+<>
+<>
+<>
+<>
+<>
+
+Diamond regions: a, b, d
+Loop region: c
+Unstructured region: e
+Store:
+Load:
+Deallocation: <>
+
+<>
+<>
+<>
+<>
+
+Figure 5. Node splitting for an unstructured region.
+A diamond region is a two-way diverge (entry) and two-
+way merge (exit) SESE region; each diverge edge imme-
+diately dominates [1] only one merge edge, and the dom-
+inated merge edge immediately postdominates [1] the di-
+verge edge. A loop region is a SESE region where the entry
+of the region is a merge vertex, the exit of the region is a
+diverge vertex, and a backedge [1] connects the entry to the
+exit. All other SESE regions are unstructured regions. In
+Figure 4, regions (cid:6), (cid:7) and (cid:8) are diamond regions, region (cid:9)
+is a loop region and region (cid:10) is an unstructured region.
+Some unstructured regions can be transformed into dia-
+mond regions by using node splitting [1] if the unstructured
+regions are multi-way diverge or multi-way merge region.
+Figure 5 shows a three-way merge unstructured region has
+been transformed into two diamond regions by introducing
+a new node  (cid:1) and a new edge (cid:10) (cid:1) .
+Lemma 1 (Load, store and deallocation decoupling)
+For an optimal register allocation, it is unnecessary to load
+symbolic register (cid:11) to real register  at all incoming edges
+of a merge vertex, or to store (cid:11) or to deallocate (cid:11) from  at
+all outgoing edges of a diverge vertex.
+Proof: By construction. Assume an optimal solution 
+includes load of (cid:11) at each incoming edge of merge vertex
+(cid:12) . Another optimal solution  (cid:1) without a load of (cid:11) at any
+incoming edge of (cid:12) can be constructed as follows: Remove
+the loads of (cid:11) from each incoming edge of (cid:12) . Perform
+depth-Ýrst-search (DFS) traversal of the live-range graph of
+(cid:11) forward from (cid:12) . Place a load of (cid:11) preceding a use of (cid:11) ,
+and place a load of (cid:11) at a merge edge of the graph. Because
+the set of the inserted load locations immediately postdom-
+inates the removed load locations, the removed load loca-
+tions immediately dominates the set of the inserted load lo-
+cations, the constructed solution is cost equivalent to the
+optimal solution. Furthermore, because no use is between
+the two set of load locations, the constructed solution is a
+valid solution. Similar arguments hold for stores and deal-
+locations at all outgoing edges of a diverge vertex. (cid:1)
+
+n
+
+ní
+eí
+n
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+4.2.1. Void region coupling
+
+Diamond regions are common constructs in LRGs. This
+section presents four reduction techniques which can elim-
+inate unnecessary load, store, and deallocation decisions in
+diamond regions: Void region coupling, symmetric decision
+selection, jump-edge nulliÝcation, and asymmetric decision
+elimination.
+void region A LRG region is void for symbolic register (cid:11)
+if (cid:11) is not redeÝned or used in the region.
+coupled decision Two decisions are coupled if the taken
+action of one decision is associated with the taken ac-
+tion of another decision.
+paired decision A decision placed on a diverge edge in a
+diamond region is paired with the decision placed on
+the same side merge edge in the diamond region if the
+diverge edge starts at the entry of the diamond region,
+the merge edge ends at the exit of the diamond region.
+Theorem 4.1 (Void region coupling) For optimal register
+allocation, if a diamond region is void for symbolic register
+(cid:11) , then the paired deallocation and load decisions of (cid:11) are
+coupled in the region.
+Proof: By contradiction. Assume an optimal solution
+deallocates (cid:11) from real register  on a diverge edge in a
+diamond region and does not load (cid:11) to  on the same side
+merge edge in the region, or assume an optimal solution
+does not deallocate (cid:11) from  on the diverge edge and loads
+(cid:11) on the merge edge. (cid:11) can not be in  at the merge vertex
+or at the diverge vertex of the region. This requires (cid:11) to be
+deallocated from  for both diverge edges or to be loaded
+
+(cid:1)(cid:2)(cid:16)(cid:2) (cid:4)(cid:7)(cid:13)(cid:17) (cid:5)(cid:19)(cid:7) (cid:5)(cid:17)	(cid:6)(cid:7)
+
+Load, store and deallocation
+decoupling
+
+<>
+
+Gsr
+<>
+.......
+.......
+V
+(a)
+
+Figure 6. Decision decoupling and coupling.
+
+<>
+<>
+.......
+.......
+V
+(a)
+
+coupling
+
+Gsr
+<>
+<>
+d_left
+d_right
+m_left
+m_right
+Load and deallocation coupling
+(b)
+
+coupling
+m_right
+
+Figure 7. Symmetric solutions in diamond regions.
+into  for both merge edges. But these are contradictions
+because from Lemma 1 it is never necessary to deallocate 
+on both diverge edges or to load  on both merge edges. (cid:1)
+By coupling the paired deallocation and load decisions,
+one decision replaces the two decisions in the basic ORA
+model.
+4.2.2. Symmetric decision selection
+symmetric Two decisions (cid:13) and (cid:14) are symmetric decisions
+if for any solution (cid:15) with a taken action of (cid:13) and a
+not taken action of (cid:14) , there always exists an equiva-
+lent cost solution (cid:15) (cid:1) with a not taken action of (cid:13) and a
+taken action of (cid:14) . The solutions (cid:15) and (cid:15) (cid:1) are symmet-
+ric solutions.
+Figure 7(a) shows a void diamond region for symbolic
+registers (cid:11)(cid:1) to (cid:11) . In the basic ORA model, coupled deallo-
+cation/load decisions for (cid:11) (cid:1) to (cid:11) are placed at the diverge
+edge and at the merge edge of the region for each of (cid:16) real
+registers available for allocation. The total number of the
+coupled deallocation/load decisions is   (cid:16).
+However, many of these decisions are symmetric deci-
+sions because an optimal solution requires at most 2 real
+registers for symbolic registers deÝned and used inside the
+region. The coupled deallocation/load decisions for any set
+of 2 out of (cid:16) real registers are symmetric decisions. These
+symmetric decisions produce the total number of  (cid:5)
+(cid:2)  sym-
+metric solutions for this region.
+Theorem 4.2 (Symmetric decision selection) For optimal
+register allocation problem, if the number of the symbolic
+registers which are void to a diamond region is greater than
+the number of real registers available for allocation, and the
+region is colorable with (cid:17) colors, then it is sufﬁcient to ar-
+bitrarily select (cid:17) real registers as the allocation set for the
+coupled deallocation/load decisions of the symbolic regis-
+ters which are void to the region.
+
+A, B, S1, ..., Sn
+<>
+A = A + B
+A, B, S1, ..., Sn
+1
+2
+k
+Load, Store and Deallocation
+Decisions in a Diamond Region
+(a)
+Control Flow Graph
+(b)
+4.2.2. Symmetric decision selection
+
+S1
+S2
+S1 = S1 + a
+Sn
+S2 = S2 + S1
+Sk = Sk + Sk-1
+Sk+1 = Sk+1 + Sk
+Sn = Sn + Sn-1
+Control Flow Graph
+(b)
+Live Range Graphs
+(c)
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+Proof: By contradiction. Suppose (cid:17)  (cid:4) symbolic reg-
+isters which are void to the region are deallocated from and
+loaded into (cid:17)  (cid:4) real registers at the diverge edge and the
+merge edge of the region. Because (cid:17) real registers will be
+enough for allocation for all symbolic registers deÝned or
+used in the region without spills, at least one of the (cid:17)  (cid:4)
+real registers will not be used by any of those symbolic reg-
+isters deÝned or used inside the region. It is unnecessary
+to deallocate the real register from a symbolic register at
+the diverge edge of the region and load back into the same
+symbolic register at the merge edge of the region. (cid:1)
+By applying the proposed reduction technique, the num-
+ber of symmetric decisions has been reduced from   (cid:16)
+to   (cid:5), and the number of symmetric solutions has been
+reduced by a factor of  (cid:5)
+(cid:2) . When  (cid:6) (cid:7)(cid:8) and (cid:16) (cid:6) (cid:9)(cid:5), the
+number of the reduced symmetric decisions is 1200, and
+the reduction of the symmetric solutions is about a factor of
+500.
+In practice, the number of symmetric decisions produced
+are very large for some cases. The large number of symmet-
+ric decisions can produce a large number of symmetric so-
+lutions which causes a large number of branch-and-bound
+[24] iterations for the IP solver to Ýnd an optimal integer
+solution. Figure 7(b) shows an example of a control-Ðow
+graph which illustrates the huge reduction in symmetric so-
+lutions the technique can produce. Figure 7(c) shows the
+live range graphs of the symbolic registers. The number of
+the symmetric decisions produced before and after apply-
+ing the reduction technique are 	 (cid:6)(cid:7)(cid:8) (cid:7) (cid:6)   (cid:16)  (cid:17) , and
+	(cid:10)(cid:8) (cid:7) (cid:6)   (cid:5)  (cid:17) , where (cid:17) is the number of diamond re-
+gions in the graph. The total number of symmetric solutions
+have been reduced by a factor of  (cid:6)  (cid:5)
+(cid:16) (cid:6) (cid:9)(cid:5), and (cid:17) (cid:6) (cid:4)(cid:8), the number of symmetric decisions
+have been reduced from 12800 to 800, and the number of
+symmetric solutions have been reduced by a factor of (cid:4)(cid:8) (cid:1)(cid:1) .
+
+Figure 8. Jump-edge nulliﬁcation.
+
+Gsr
+<>
+
+(cid:2) (cid:12) . For  (cid:6) (cid:7)(cid:8),
+
+4.2.3. Jump-edge nulliﬁcation
+
+jump edge A jump edge is both a merge edge and a diverge
+edge in a LRG.
+merge constraint The merge constraint enforces that the
+allocation of a symbolic register on any of the incom-
+ing edges of a merge vertex must be same for each real
+register.
+A jump edge is void for any symbolic register live
+through it. ORA allows symbolic registers to be deallocated
+and spilled on a jump edge to satisfy the merge constraint
+at the end vertex of the jump edge. Under certain condi-
+tions, the deallocation and spill decisions on a jump edge
+are unnecessary for optimal register allocation.
+Theorem 4.3 (Jump-edge nulli ﬁcation) For an optimal
+register allocation, when a symbolic register (cid:11) is live
+through a diamond region, and a jump edge connects the
+entry of the region to the exit:
+a) the deallocation decision on the jump edge for (cid:11) is
+unnecessary if (cid:11) is void in the region,
+b) the store decision on the jump edge for (cid:11) is unneces-
+sary if (cid:11) is not deﬁned in the region,
+c) the load decision on the jump edge for (cid:11) is unneces-
+sary if (cid:11) is not deﬁned in the region and there is no
+load of (cid:11) before a use of (cid:11) in the region.
+Proof: By contradiction. a) Suppose (cid:11) is deallocated
+from real register  on the jump edge. Based on Theorem
+4.1, (cid:11) must be loaded into  on the jump edge as well. Be-
+cause no symbolic register will reuse  on the jump edge, it
+is redundant to deallocate and reload (cid:11) on the jump edge.
+b) Suppose (cid:11) is stored into memory on the jump edge from
+real register . Without a deÝnition of (cid:11) in the region, (cid:11)
+must be either stored into memory from  on both diverge
+edges, or loaded into  or loaded into another real register 
+on the jump edge. For case 1, based on Lemma 1, it is never
+necessary to store (cid:11) on both diverge edges. For case 2, it
+is redundant because no symbolic register will reuse . For
+case 3, the merge constraint will enforce a load of (cid:11) to  on
+both merge edges. Based on Lemma 1, it is never necessary
+to load (cid:11) on both merge edges.
+c) Suppose (cid:11) is loaded into real register  on the jump edge.
+Without a deÝnition of (cid:11) and without a load of (cid:11) before any
+use of (cid:11) in the region, the merge constraint will enforce (cid:11) to
+be loaded on both merge edges. Base on Lemma 1, the loads
+of (cid:11) on both merge edges are never necessary for optimal
+register allocation. (cid:1)
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+4.2.4. Asymmetric decision elimination
+(cid:1)(cid:2)(cid:21)(cid:2)  (cid:13)(cid:17) 		(cid:6)	(cid:5)(cid:17) (cid:5)(cid:19)(cid:7)
+
+asymmetric decision A register allocation decision is
+asymmetric if the decision is placed on one, not both
+diverge edges starting at the entry of a diamond region
+or placed on one, not both merge edges ending at the
+exit of the diamond region.
+Figure 9(a)-9(c) show the asymmetric deallocation,
+asymmetric load and asymmetric store decisions. Under
+certain conditions, an asymmetric decision is unnecessary
+for optimal register allocation.
+Theorem 4.4 (Asymmetry elimination) For an optimal
+register allocation, when symbolic register (cid:11) is live through
+a diamond region:
+a) an asymmetric deallocation decision of (cid:11) is unneces-
+sary if there is no load of (cid:11) along at least one path
+from the deallocation decision location to the exit ver-
+tex of the region and no deallocation along at least one
+path of the other side of the region.
+b) an asymmetric load decision of (cid:11) is unnecessary if
+there is no deallocation of (cid:11) along at least one path
+from the entry vertex of the region to the load deci-
+sion location and no load along at least one path of
+the other side of the region.
+c) an asymmetric store decision of (cid:11) is unnecessary if
+there is no load of (cid:11) along any path from the store
+decision location to the exit vertex of the region.
+(cid:1)(cid:2)(cid:21)(cid:2)  (cid:13)(cid:17) 		(cid:6)	(cid:5)(cid:17) (cid:5)(cid:19)(cid:7)
+The asymmetry reduction technique presented previ-
+ously can be applied to loop regions and unstructured re-
+gions, and the jump-edge reduction technique can be ap-
+plied to the jump edge in a loop region.
+
+Proof: Based on Lemma 1 and the merge constraint. (cid:1)
+(cid:1)(cid:2)(cid:21)(cid:2)  (cid:13)(cid:17) 		(cid:6)	(cid:5)(cid:17) (cid:5)(cid:19)(cid:7)
+The asymmetry reduction technique presented previ-
+ously can be applied to loop regions and unstructured re-
+gions, and the jump-edge reduction technique can be ap-
+plied to the jump edge in a loop region.
+
+<>
+
+G
+r
+s
+(a)
+
+Figure 9. Asymmetric decisions.
+
+r
+sG
+(b)
+
+r
+sG
+(c)
+
+Figure 10. Cost-guided load/store reductions.
+(cid:1)(cid:2)(cid:1)(cid:2) (cid:23)	(cid:19)	(cid:7)(cid:17)(cid:5)(cid:17) (cid:5)(cid:17)	(cid:6)(cid:7)
+Previously presented reduction techniques identify re-
+dundant allocation decisions by taking advantage of a pro-
+gramís structure. Cost-guided reduction is to identify re-
+dundant load and store decisions by considering the alloca-
+tion overhead of each decision.
+Theorem 4.5 (Dominated store) Given two store deci-
+sions allowed at an early location and a late location in
+a control-ﬂow graph for symbolic register (cid:11) , the late store
+decision is redundant for optimal register allocation if 1)
+the early location dominates the late location, and 2) the
+execution count of the basic block at the early location is
+less than or equal to the execution count of the basic block
+at the late location.
+Proof: The Ýrst condition ensures the correctness when
+replacing the late store with the early store. The second
+condition ensures the allocation overhead to place a store
+at the early location is less than or equal to the overhead to
+place a store at the late location. (cid:1)
+Figure 4.5 shows a portion of a control-Ðow graph la-
+beled with execution counts, that contains a region of high
+register pressure. Symbolic register S is allowed to store at
+either (cid:11)(cid:7)(cid:10) (cid:14) or (cid:11) (cid:10)(cid:7) in the basic ORA model. However,
+optimal register allocation will never store S at (cid:11)  (cid:10)(cid:7) be-
+cause the allocation overhead to store S at (cid:11) (cid:7)(cid:10) (cid:14) is cheaper.
+Symmetrically, a load placed at the  (cid:7)(cid:10) (cid:14) as shown in
+the Figure 4.5 is redundant based on the following theorem.
+Theorem 4.6 (Postdominated load) Given two load deci-
+sions allowed at a early location and a late location in a
+control-ﬂow graph for symbolic register (cid:11) , the early load
+decision is redundant for optimal register allocation if 1)
+
+S = ......
+S early
+1
+1
+99
+lateS
+Learly
+100
+1
+L
+late
+...... = S
+(cid:1)(cid:2)(cid:1)(cid:2) (cid:23)	(cid:19)	(cid:7)(cid:17)(cid:5)(cid:17) (cid:5)(cid:17)	(cid:6)(cid:7)
+
+High
+Register 
+Pressure
+Region
+late
+...... = S
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+5. Local reduction
+
+(cid:1)(cid:2)(cid:25)(cid:2) (cid:26)	(cid:7) (cid:17)(cid:7)(cid:19) (cid:27)(cid:5) (cid:27)(cid:7)(cid:5)(cid:13)(cid:6)(cid:27) (cid:28)
+
+A1
+B1
+
+Figure 11. SESE region hieararchy and program structure
+tree.
+the late location postdominates the early location, 2) a load
+at the later location must result in the symbolic register (cid:11)
+being in a real register at every use and last-use that a load
+at the earlier location would, 3) the execution count of the
+basic block at the late location is less than or equal to the
+execution count of the basic block at the early location.
+Proof: Proof is similar to Theorem 4.5. (cid:1)
+The hierarchical reduction approach starts by building
+the program structure tree (PST)[19], a hierarchical repre-
+sentation of program structure based on single-entry single-
+exit (SESE) regions of the control Ðow graph. Figure 11(a)
+shows a program control-Ðow graph with its SESE regions
+marked. Figure 11(b) is the region-based PST. There are
+Ýve types of SESE regions: basic-block regions, container
+regions, loop regions, diamond regions and unstructured re-
+gions. A container region is the maximal sequential set of
+SESE regions.
+Once the PST is built, the basic block regions will be vis-
+ited Ýrst during the DFS traversal of the tree in post-order.
+Data Ðow analysis is accomplished for basic block regions
+by scanning each instruction. The data Ðow information of
+the children regions are combined into the parent regions
+(containers). Structured and unstructured regions are ana-
+lyzed separately by applying the previous discussed reduc-
+tion techniques.
+Local reduction examines symbolic registers used in ad-
+jacent instructions to identify unnecessary load and deallo-
+
+C1
+C2
+E1
+E2
+C3
+A3
+H4
+
+A2
+A3
+H1
+H2
+H3
+H4
+H5
+(a)
+
+D1
+F1
+G1
+G2
+D2
+F2
+D3
+H2
+(a)
+
+B1
+B2
+C1
+C2
+C3
+D1
+E1
+E2
+F1
+G1
+
+Root
+A1
+A2
+*
+A3
+B2
+H1
+H2
+H3
+C3
+D1
+D2
+D3
+E2
+F1
+F2
+G1
+G2
+(b)
+Container
+Loop
+Diamond
+*
+
+H4
+H5
+D3
+F2
+(b)
+Basic-Block
+Container
+Loop
+Diamond
+*
+Unstructured
+
+Figure 12. (a) Def-use intervals and decision placements, (b)
+interval-based reduction.
+cation decisions generated in the basic ORA model. def-use
+intervals are introduced as the analysis scope.
+def-use interval A def-use interval is a segment of the live-
+range graph of a symbolic register (cid:11) that starts at a
+deÝnition or a use of (cid:11) , ends at an adjacent use or last-
+use of (cid:11) , and contains no merge vertex.
+When an interval crosses over a diverge vertex, the in-
+terval is segmented at the diverge vertex to form multiple
+intervals. Figure 12(a) shows the four def-use intervals of
+symbolic register (cid:11) .
+Theorem 5.1 For an optimal register allocation, the deal-
+location and load decisions placed in an interval of sym-
+bolic register (cid:11) are unnecessary if
+a) no symbolic register except S appears within the inter-
+val, or
+b) any symbolic register appearing is used at the start or
+at the end of the interval.
+Proof: By contradiction. Assume an optimal solution
+deallocates (cid:11) inside the interval. a) Because no symbolic
+register except (cid:11) will use the real register deallocated from
+(cid:11) in the interval, it is unnecessary to deallocate the real reg-
+ister holding (cid:11) , or load (cid:11) back in the interval. b) The only
+symbolic registers which can use the real register deallo-
+cated from (cid:11) are the symbolic registers which are used to-
+gether with (cid:11) at the start or at the end of the interval. For
+a valid allocation, those symbolic registers must have been
+allocated with different real registers at the start or at the
+end of the interval. (cid:1)
+Figure 12(b) shows a situation where the deallocation
+and load decisions for symbolic register (cid:11) (cid:1) and (cid:11)(cid:2) in their
+def-use intervals are redundant.
+6. Constraint Reduction
+Constraint reductions are based upon decision reduc-
+tions. After redundant decisions have been eliminated,
+
+Gs
+def
+<>
+<>
+use
+interval 1
+interval 2
+<>
+<>
+interval 4
+interval 3
+last uses
+(a)
+6. Constraint Reduction
+
+S1 = ...
+GS1
+S2G
+<>
+interval 2
+ mem = S2
+<>
+<>
+interval 3
+ ... = S1 + S2
+(b)
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+Figure 13. Deallocation constraint before (a) and after (b) re-
+duction
+some constraints may not exist, or some constraints may
+be automatically satisÝed by other constraints. This sec-
+tion will analyze redundant deallocation constraints, must-
+allocate constraints and single-symbolic constraints gener-
+ated in the basic ORA model.
+Deallocation Constraints A deallocation constraint is con-
+structed at a deallocation decision location of symbolic reg-
+ister (cid:11) to allow deallocation of (cid:11) .
+As shown in Figure 13, when the deallocation decision
+is eliminated, the decision variable (cid:22) (cid:16)(cid:7)(cid:10)  (cid:17)(cid:10)(cid:7) in the Equa-
+tion 1 equals 0. The Ðow variables (cid:22) (cid:7) and (cid:22)(cid:17) are
+reduced to one variable as shown in Figure 13(b). The deal-
+location constraint is no long necessary.
+Must-Allocate Constraint A must-allocate constraint is
+constructed after each de Ýnition and before each use of a
+symbolic register in the ORA model [17] to ensure a sym-
+bolic register must be allocated to a real register at each
+deÝnition and each use. A must-allocate constraint is con-
+structed as follows:
+For optimal register allocation, if no deallocation deci-
+sion exists between two adjacent must-allocate constraints
+for a symbolic register, then the second must-allocate con-
+straint is redundant because only allocation decisions are
+inserted between the locations of the two constraints. The
+decision variable terms in the second constraint are a super-
+set of the decision variable terms in the Ýrst constraint. The
+second must-allocate constraint can be automatically satis-
+Ýed by the Ýrst must-allocate constraint.
+
+(cid:7)  (cid:22) 
+(cid:16)(cid:7)(cid:10)  (cid:17)(cid:10)(cid:7) (cid:6) (cid:22) 
+(cid:17)
+(cid:22) 
+ (cid:3) (cid:16) (cid:10) (cid:10)(cid:6)  (cid:10)(cid:24) (cid:25)(cid:10) (cid:10)
+(cid:16) (cid:10) (cid:10)(cid:6)  (cid:10)(cid:24) (cid:25)(cid:10) (cid:10)
+
+Gsr
+r
+X_pre
+r
+X_cont
+<>
+(a)
+
+(cid:1)
+(cid:2)(cid:5)
+
+r
+Gs
+r
+X_pre
+(b)
+(cid:13)
+ (cid:4) (cid:4)
+
+(1)
+(2)
+
+Single-symbolic Constraint A single-symbolic constraint
+is constructed after each deÝnition and after each load for a
+real register in the ORA model [17] to ensure a real register
+can be allocated to at most one symbolic register. A single-
+symbolic constraint is constructed as follows:
+(cid:11) (cid:10)  (cid:25)(cid:27)(cid:10) (cid:14)(cid:7) (cid:25)(cid:9) (cid:10)(cid:24) (cid:25)(cid:10) (cid:10)
+For optimal register allocation, if no deallocation con-
+straint exists between two adjacent single-symbolic con-
+straints for a real register, then the Ýrst single-symbolic con-
+straint is redundant because only allocation decisions are
+inserted between the locations of the two constraints. The
+decision variable terms in the Ýrst constraint are a subset of
+the decision variable terms in the second constraint. The
+Ýrst single-symbolic constraint can be automatically satis-
+Ýed by the second single-symbolic constraint.
+This section evaluates the faster optimal register alloca-
+tor in terms of compile-time performance, model complex-
+ity and code quality.
+The faster optimal register allocator is compared exper-
+imentally against Goodwin and Wilken ís basic ORA allo-
+cator [17] in terms of both compile-time performance and
+model complexity. The faster allocator is compared against
+a Chaitin-style graph-coloring allocator in terms of code
+quality. The graph-coloring allocator is implemented based
+on the optimistic allocator by Briggs et al., [5]. Th opti-
+mistic allocator includes rematerialization and coalescing
+to reduce spill code overhead. Execution proÝle is used to
+determine spill costs for each allocator.
+The faster ORA allocator, the basic ORA allocator and
+the graph-coloring allocator are all built into the GNU C
+compiler (GCC), version 2.5.7, targeted to the PA-RISC ar-
+chitecture with 24 real registers available for allocation. The
+SPEC92 integer benchmark suite, which consists of 2399
+integer functions, is used for all experiments. This bench-
+mark set is selected so that the results are directly compa-
+rable with those published in [17]. The integer programs
+are solved using a commercial integer programming solver,
+CPLEX 7.1 [12], running on a HP9000/785 workstation
+with a 360MHz PA-8000 processor and 1536MB of main
+memory.
+
+7. Experimental results
+(cid:29)(cid:2)(cid:3)(cid:2) (cid:5)(cid:27)(cid:17) (cid:19)(cid:28)
+
+(cid:13)
+ (cid:5) (cid:4)
+(cid:1)
+(cid:2)(cid:19)
+(3)
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+Figure 14 shows the number of functions out of the 2399
+functions in the SPEC92 integer benchmarks solved opti-
+mally by the basic ORA allocator and by the faster ORA
+allocator for time limits from 1 to 1024 seconds. The time
+refers to the allocation time used by each allocator for each
+function. The allocation time includes the analysis time, the
+integer-program solution time and the instruction rewrite
+time. Figure 14 also shows the results published in [17].
+The baseline allocator is built on the same model as the ba-
+sic ORA allocator, but the experiments use CPLEX 3.0 run-
+ning on a HP9000/735 workstation with a 99MHz PA-7000
+processor and 128MB of main memory.
+The basic ORA allocator is compared against the base-
+line allocator to reÐect the speedup due to the faster ma-
+chine and the improved CPLEX solver. The faster ORA
+allocator is compared against the basic ORA allocator to re-
+Ðect the speedup due to the improved model. The number
+of functions solved optimally in a time limit of 1024 sec-
+onds by each base allocator is chosen for each comparison
+to reÐect the ability of each allocator to solve hard prob-
+lems, which require greater allocation time.
+The baseline ORA allocator solves 1979 functions op-
+timally within a time limit of 1024 seconds, while the ba-
+sic ORA allocator solves 1979 functions optimally within a
+time limit of 10 seconds. This represents a 100X speedup
+for the hardest of these 1979 functions, which is due to the
+faster machine and the improved algorithm in the newer
+CPLEX solver. The basic ORA allocator solves 2202 func-
+tions optimally within a time limit of 1024 seconds, while
+the faster ORA allocator solves the same number of func-
+tions optimally within a time limit of 7 seconds. This rep-
+resents a 150X speedup for the hardest of these 2202 func-
+tions, which is due to the improved model. Furthermore, the
+
+(cid:29)(cid:2)(cid:16)(cid:2) (cid:23)(cid:7) (cid:5)	(cid:7)(cid:5) (cid:5)(cid:31)(cid:13)(cid:6)(cid:5)
+
+Figure 14. SPEC92 Integer benchmark functions allocated using the baseline ORA allocator, the basic ORA allocator and the faster
+ORA allocator.
+
+2400
+2200
+2000
+1800
+1600
+1400
+1200
+1000
+800
+600
+400
+200
+0
+n
+u
+F
+c
+t
+i
+n
+o
+s
+A
+l
+l
+o
+a
+c
+t
+e
+d
+U
+s
+i
+g
+n
+O
+A
+R
+ 
+ 
+ 
+
+1
+2
+1116
+1646
+1919
+1351
+1774
+2062
+
+4
+8
+Baseline ORA  
+Basic ORA  
+Faster ORA  
+1351
+1774
+2062
+1482
+1872
+2149
+1601
+1957
+2224
+
+Allocation Time Limit (secs.)
+
+16
+32
+64
+2149
+1601
+1957
+2224
+1699
+2029
+2266
+1776
+2079
+2309
+1843
+2118
+I
+e
+g
+e
+n
+t
+r
+P
+r
+g
+o
+r
+a
+m
+C
+s
+n
+o
+r
+t
+n
+a
+i
+t
+s
+0.01
+0.1
+1
+10
+100
+1000
+o
+T
+t
+a
+l
+A
+l
+l
+a
+c
+o
+i
+t
+T
+n
+o
+i
+m
+e
+(
+s
+c
+e
+s
+)
+.
+ 
+ 
+ 
+ 
+ 
+
+Figure 15. ORA integer program size vs. function size for the
+SPECT92 integer benchmarks.
+Figure 16. Faster ORA allocator’s allocation time vs. function
+size for the SPECT92 integer benchmarks.
+faster allocator solves 161 more functions optimally within
+a time limit of 1024 seconds, functions which are intractable
+using the basic ORA.
+(cid:29)(cid:2)(cid:21)(cid:2) (cid:17)(cid:5)  (cid:6) (cid:5) (cid:7)(cid:28)
+Figure 15 shows the almost linear relationship,  (cid:1)(cid:1)(cid:1) ,
+between the number of constraints produced in the faster
+allocator model and function size. Compared to the  (cid:1)(cid:1)(cid:3) 
+
+128
+256
+512
+1776
+2079
+2309
+1843
+2118
+2323
+1900
+2338
+2155
+2352
+2175
+1935
+2361
+2188
+1967
+1
+10
+100
+1000
+10000
+100000
+I
+e
+g
+e
+n
+t
+r
+P
+r
+g
+o
+r
+a
+m
+C
+s
+n
+o
+r
+t
+n
+a
+i
+t
+s
+1
+10
+0.01
+0.1
+1
+10
+100
+1000
+o
+T
+t
+a
+l
+A
+l
+l
+a
+c
+o
+i
+t
+T
+n
+o
+i
+m
+e
+(
+s
+c
+e
+s
+)
+.
+n3
+(cid:29)(cid:2)(cid:21)(cid:2) (cid:17)(cid:5)  (cid:6) (cid:5) (cid:7)(cid:28)
+ 
+ 
+ 
+ 
+ 
+
+1024
+2338
+2155
+2352
+2175
+1935
+2361
+2188
+1967
+2363
+2202
+1979
+10
+100
+Intermediate Instructions
+1000
+n1.1
+10
+100
+1000
+Intermediate Instructions
+n3
+n2.5
+n1.1
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+(cid:29)(cid:2)(cid:1)(cid:2) (cid:23)(cid:17)(cid:5) 	(cid:13) (cid:7)(cid:28)
+8 Summary
+
+Figure 17. Spill code overhead components for the functions
+allocated by the ORA allocator, and by the optimistic graph-
+coloring allocator
+relationship in the basic ORA model, the faster allocator
+model is much simpler.
+Figure 16 shows the (cid:2)(cid:1)(cid:4)  relationship between the
+total allocation time and function size. By comparison, the
+basic ORA model exhibits (cid:3)  run-time complexity [17],
+a Chaitin-style graph-coloring allocator exhibits (cid:24)
+run-time complexity [5] and a priority-based graph-coloring
+allocator exhibits (cid:2)  run-time complexity [5].
+Figure 17 shows the components of the dynamic spill
+code overhead for the faster allocator and the optimistic
+graph-coloring allocator for functions allocated optimally
+by the faster allocator with a 1024 second time limit. The
+copy component is negative because it represents copies
+that are eliminated. The rematerialization component is
+negative because it represents the dynamic overhead to re-
+allocate the rematerializations is cheaper than the dynamic
+overhead to keep rematerializations at the original locations.
+Compared with the graph-coloring allocator, the faster allo-
+cator inserted 3.5 times fewer loads and stores, and removes
+3.3 times more copies.
+This paper presents a reduction approach to improve IP-
+based register allocator to solve the global register alloca-
+tion problem optimally and efÝciently. EfÝciency is one
+of the major concerns for IP-based register allocation ap-
+proaches to work well practically. Even though the IP al-
+locators can signiÝcantly reduce allocation overhead com-
+pared with graph-coloring allocators, the slow solution time
+has impeded its application in commercial compilers. The-
+oretically, integer programming is NP-complete. However
+this paper shows that by understanding the characteristics of
+the register allocation problem from optimal point of view,
+one can Ýnd ways to simplify the model without losing its
+
+)
+s
+e
+l
+c
+y
+c
+M
+(
+d
+a
+e
+h
+r
+e
+v
+O
+e
+d
+o
+C
+l
+l
+i
+p
+S
+ 
+ 
+ 
+
+1750
+1550
+1350
+1150
+950
+750
+550
+350
+150
+−50
+−250
+−450
+−650
+ 
+ 
+ 
+
+−493
+
+Copy
+Rematerialization
+Spill Load
+Spill Store
+Total
+168
+−10
+Faster ORA
+
+199
+−10
+−136
+Faster ORA
+
+−150
+
+1657
+696
+510
+60
+Graph−Coloring
+
+optimality. The reduction techniques presented in this pa-
+per are one example of using this methodology. It is shown
+that these techniques can successfully simplify the IP-based
+optimal register allocation model and speedup the solution
+time by a factor of 150 for hard problems. This paper also
+suggests that with the parallel progress of improved ma-
+chines, improved solvers and improved models, optimally
+solving all practical register allocation problems may be-
+come possible in the future.
+Understanding the characteristics of an optimal register
+allocator is not the only beneÝt for improving the efÝciency
+of the ORA allocator. These techniques may provide guid-
+ance to enhance graph-coloring allocators for better allo-
+cation quality as well. The identiÝcation of redundant or
+unnecessary deallocation decision locations in the control-
+Ðow graph may be useful for graph-coloring allocators to
+make better live-range splitting decisions. Similarly, the
+identiÝcation of redundant spilling decision locations in the
+graph may be useful for graph-coloring allocators to make
+better live-range spilling decisions.
+This research is supported by the National Science Foun-
+dation under grant CCR-9711676.
+[1] A. Aho, R. Sethi, and J. Ullman. Compilers: Principles,
+Techniques, and Tools. Addison-Wesley, 1988.
+[2] A. W. Appel and L. George. Optimal spilling for cisc ma-
+chines with few registers. In SIGPLAN conference on Pro-
+gramming language design and implementation, June 2001.
+[3] D. Bernstein, M. C. Golumbic, Y. Mansour, R. Y. Pinter,
+D. Q. Goldin, H. Krawczyk, and I. Nahshon. Spill code min-
+imization techniques for optimizing compilers. In SIGPLAN
+conference on Programming language design and imple-
+mentation, volume 24, pages 258ñ263, Portland, OR, 1989.
+[4] M. P. Bivens. Incremental register reallocation. volume 20,
+pages 1015ñ1047, October 1990.
+[5] P. Briggs. Register Allocation via Graph Coloring. PhD
+thesis, Rice University, April 1992.
+[6] P. Briggs, K. Cooper, and L. Torczon.
+Improvements to
+graph coloring register allocation. ACM Transactions on
+Programming Languages and Systems, 16(3):428ñ455, May
+1994.
+[7] R. G. Burger, O. Waddell, and R. K. Dybvig. Register allo-
+cation using lazy saves, eager restores, and greedy shufÐing.
+In SIGPLAN conference on Programming language design
+and implementation, Feburary 1995.
+[8] D. Callahan and B. Koblenz. Register allocation via hier-
+archical graph coloring.
+In Proceedings of Conference on
+Programming Language Design and Implementation, pages
+192ñ203, June 1991.
+
+Acknowledgments
+References
+
+Proceedings of the 35 th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO-35) 
+1072-4451/02 $17.00 © 2002 IEEE 
+
+[9] G. Chatin, M. Auslander, A. Chandra, J. Cocke, M. Hopkins,
+and P. Markstein. Register allocation via coloring. Computer
+Languages, 6:47ñ57, 1981.
+[10] F. Chow and J. Hennessey. The priority-based coloring ap-
+proach to register allocation. ACM Trans. on Programming
+Languages and Systems, 12(4):501ñ536, October 1990.
+[11] L. P. Cindy Norris, Lori. Register allocation over the pro-
+gram dependence graph. In SIGPLAN conference on Pro-
+gramming language design and implementation, Florida,
+Orlando, 1994.
+[12] CPLEX Optimization, Inc. Using the CPLEX Callable Li-
+brary. 1994.
+[13] Farach and Liberatore. On local register allocation.
+In
+SODA: ACM-SIAM Symposium on Discrete Algorithms (A
+Conference on Theoretical and Experimental Analysis of
+Discrete Algorithms), 1998.
+[14] C. W. Fraser and D. R. Hanson. Simple register spilling in
+a retargetable compiler. Software-Practice and Experience,
+22(1):85ñ99, January 1992.
+[15] R. A. Freiburghouse. Register allocation via usage counts.
+CACM, 17:638ñ642, 1974.
+[16] D. Goodwin. Optimal and Near-Optimal Global Register
+Allocation. PhD thesis, University of California, Davis, De-
+cember 1996.
+[17] D. Goodwin and K. Wilken. Optimal and near-optimal
+global register allocation using 0-1 integer programming.
+Software Practice and Experience, 26(8):929ñ965, August
+1996.
+[18] T. G. Guei-Yuan Lueh and A.-R. Adl-Tabatabai. Global reg-
+ister allocation based on graph fusion. In 9th Workshop on
+Languages and Compilers for Parallel Computing, August
+1996.
+[19] R. Johnson, D. Pearson, and K. Pingali. The program struc-
+ture tree: Computing control regions in linear time. ACM
+SIGPLAN Notices, 29:171ñ185, 1994.
+[20] T. Kong and K. D. Wilken. Precise register allocation for
+irregular architectures. In International Symposium on Mi-
+croarchitecture, pages 297ñ307, 1998.
+[21] E. Lowry and C. Medlock. Object code optimization.
+CACM, 12:13ñ22, 1969.
+[22] M.R.Gary and D.Johnson. computers and Intractability:A
+Guide to the to the Theory of NPCompleteness. San Fran-
+sisco: W. H. Freeman, 1979.
+[23] M. Naik and J. Palsberg. Compiling with code-size con-
+straints. In Proceedings of Languages, Compilers, and Tools
+for Embedded Systems (LCTES), June 2002.
+[24] G. Nemhauser and L. Wolsey.
+Integer and Combinatorial
+Optimization. John Wiley & Sons, 1988.
+[25] D. E. M. O. K. Peter Bergner, Peter Dahl. Spill code mini-
+mization via interference region spilling. In SIGPLAN con-
+ference on Programming language design and implementa-
+tion, May 1997.
+[26] M. S. R. Gupta and T. Steele. Register allocation via clique
+separators. SIGPLAN conference on Programming language
+design and implementation, 25:264ñ274, 1989.
+[27] R. Sethi. Complete register allocation problems. SIAM Jour-
+nal on Computing, 4(3):226ñ248, September 1975.
+[28] Y. Zhang, X. Hu, and D. Chen. Low energy register alloca-
+tion beyond basic blocks, 1999.
